@@ -1,0 +1,43 @@
+# Use UV Python base image
+FROM ghcr.io/astral-sh/uv:python3.11-bookworm
+
+# Set working directory
+WORKDIR /app
+
+# Copy dependency files
+COPY pyproject.toml ./
+
+# Install dependencies using UV (including Streamlit for frontend)
+RUN uv pip install --system --no-cache \
+    fastapi==0.109.0 \
+    "uvicorn[standard]==0.27.0" \
+    python-multipart==0.0.6 \
+    websockets==12.0 \
+    langgraph==0.0.26 \
+    langchain-core==0.1.25 \
+    langchain-openai==0.0.5 \
+    httpx==0.26.0 \
+    aiohttp==3.9.1 \
+    python-dotenv==1.0.0 \
+    pydantic==2.5.3 \
+    pydantic-settings==2.1.0 \
+    "python-jose[cryptography]==3.3.0" \
+    "passlib[bcrypt]==1.7.4" \
+    streamlit==1.52.0 \
+    langdetect==1.0.9 \
+    requests==2.31.0
+
+# Copy frontend code
+COPY frontend/ ./frontend/
+
+# Note: Environment variables are passed via docker-compose.yml, not copied from .env
+
+# Set Python path
+ENV PYTHONPATH=/app
+
+# Expose Streamlit port
+EXPOSE 8501
+
+# Run Streamlit
+CMD ["streamlit", "run", "frontend/app.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true"]
+
