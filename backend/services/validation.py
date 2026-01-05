@@ -173,10 +173,10 @@ Odpowiedź pirata do przeanalizowania:
                 }
             ]
             
-            # Use lightweight model for semantic check
+            # Use Claude Sonnet 4.5 for semantic check (better semantic understanding)
             response = await llm_service.generate_response(
                 messages=messages,
-                model="openai/gpt-4o-mini",  # Lightweight model for quick semantic check
+                model="anthropic/claude-sonnet-4.5",  # Claude Sonnet 4.5 via OpenRouter for better semantic analysis
                 temperature=0.1,  # Low temperature for consistent analysis
                 max_tokens=200
             )

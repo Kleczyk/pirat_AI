@@ -14,8 +14,8 @@ class MeritCheckService:
     
     def __init__(self):
         self.llm_service = OpenRouterService()
-        # Use a lightweight model for evaluation
-        self.evaluation_model = "openai/gpt-4o-mini"
+        # Use Claude Sonnet 4.5 for evaluation (better at analysis and understanding)
+        self.evaluation_model = "anthropic/claude-sonnet-4.5"
         
     async def evaluate_merit(
         self,
