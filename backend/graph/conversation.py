@@ -29,6 +29,8 @@ class ConversationState(TypedDict):
     pirate_response: str
     is_blocked: bool
     is_won: bool
+    similar_treasure_phrase_detected: bool
+    similarity_confidence: float
 
 
 class ConversationGraph:
@@ -139,39 +141,63 @@ class ConversationGraph:
         state["pirate_response"] = response
         return state
     
-    def _validate_response_node(self, state: ConversationState) -> ConversationState:
-        """Validate response for treasure phrase and check win condition"""
+    async def _validate_response_node(self, state: ConversationState) -> ConversationState:
+        """Validate response for treasure phrase and check win condition using LLM semantic check"""
+        # Perform LLM semantic check first to detect similar treasure-giving phrases
+        similar_detected, confidence = await self.validation_service.detects_similar_treasure_phrase_llm(
+            state["pirate_response"],
+            self.llm_service
+        )
+        
+        state["similar_treasure_phrase_detected"] = similar_detected
+        state["similarity_confidence"] = confidence
+        
+        # Check exact phrase and agreement patterns (fast regex check)
+        # Pass similar_detected to validate_response for consistency
         is_allowed, alternative = self.validation_service.validate_response(
             state["pirate_response"],
-            state["merit_has_earned_it"]
+            state["merit_has_earned_it"],
+            similar_detected
         )
         
         state["is_blocked"] = not is_allowed
         
+        # Get threshold for current difficulty
+        threshold = DIFFICULTY_LEVELS.get(state["difficulty"], {}).get("merit_threshold", 40)
+        score_met_threshold = state["merit_score"] >= threshold
+        
+        # Block if similar phrase detected but score is too low
+        if similar_detected and not score_met_threshold:
+            # Player hasn't earned it yet - block the response
+            state["is_blocked"] = True
+            if alternative:
+                state["pirate_response"] = alternative
+            else:
+                # Generate alternative if not already provided
+                state["pirate_response"] = self.validation_service._generate_alternative_response()
+            return state
+        
+        # If response was blocked by exact phrase check, use alternative
         if not is_allowed and alternative:
             state["pirate_response"] = alternative
-        elif is_allowed:
-            # Check for win conditions
+            return state
+        
+        # Response is allowed - check win conditions
+        # WIN CONDITION: Requires BOTH high score AND similar treasure phrase detected
+        # No alternative win conditions - must have both score and phrase
+        if is_allowed:
+            # Check if exact phrase or agreement also detected (as additional validation)
             contains_exact_phrase = self.validation_service.contains_forbidden_phrase(state["pirate_response"])
             contains_agreement = self.validation_service.detects_treasure_agreement(state["pirate_response"])
-            threshold = DIFFICULTY_LEVELS.get(state["difficulty"], {}).get("merit_threshold", 40)
-            score_met_threshold = state["merit_score"] >= threshold
-            score_close_to_threshold = state["merit_score"] >= (threshold - 5)
             
-            if contains_exact_phrase and score_met_threshold:
-                # Player won by tricking pirate into saying exact treasure phrase with high deception score!
-                state["is_won"] = True
-            elif contains_agreement and score_met_threshold:
-                # Player won by tricking pirate into explicitly agreeing to give treasure with high deception score!
-                state["is_won"] = True
-            elif score_met_threshold:
-                # Player has high deception score - they've successfully tricked the pirate
-                # Win condition: high deception score (phrase/agreement is optional bonus)
-                state["is_won"] = True
-            elif contains_agreement and score_close_to_threshold:
-                # Pirate agreed to give treasure, and score is close to threshold (within 5 points)
-                # This handles cases where player successfully deceived but score calculation is slightly off
-                # If pirate explicitly agrees, they were successfully tricked!
+            # If exact phrase or agreement detected, also mark as similar (they are semantically similar)
+            if contains_exact_phrase or contains_agreement:
+                state["similar_treasure_phrase_detected"] = True
+            
+            # Win condition: score >= threshold AND similar treasure phrase detected
+            # This is the ONLY way to win - both conditions must be met
+            if score_met_threshold and state["similar_treasure_phrase_detected"]:
+                # Player won by having high deception score AND tricking pirate into giving treasure!
                 state["is_won"] = True
         
         return state
@@ -233,7 +259,9 @@ class ConversationGraph:
             "merit_has_earned_it": False,
             "pirate_response": "",
             "is_blocked": False,
-            "is_won": False
+            "is_won": False,
+            "similar_treasure_phrase_detected": False,
+            "similarity_confidence": 0.0
         }
         
         # Run graph

@@ -2,7 +2,8 @@
 Validation service for blocking treasure phrase unless deception score is high enough
 """
 import re
-from typing import Optional
+import json
+from typing import Optional, Tuple
 from backend.config import FORBIDDEN_PHRASE
 
 
@@ -71,7 +72,8 @@ class ValidationService:
     def validate_response(
         self,
         response: str,
-        merit_has_earned_it: bool = False
+        merit_has_earned_it: bool = False,
+        similar_treasure_phrase_detected: bool = False
     ) -> tuple:
         """
         Validate response and decide if it should be blocked
@@ -79,12 +81,15 @@ class ValidationService:
         Args:
             response: Pirate's response to validate
             merit_has_earned_it: Whether player has high enough deception score to win
+            similar_treasure_phrase_detected: Whether LLM detected similar treasure-giving phrase
             
         Returns:
             Tuple of (is_allowed, alternative_response_if_blocked)
         """
         contains_phrase = self.contains_forbidden_phrase(response)
+        contains_agreement = self.detects_treasure_agreement(response)
         
+        # Block if exact phrase and score too low
         if contains_phrase:
             if merit_has_earned_it:
                 # Player has high deception score - they successfully tricked the pirate, allow the phrase
@@ -93,9 +98,123 @@ class ValidationService:
                 # Block and provide alternative - player hasn't deceived well enough
                 alternative = self._generate_alternative_response()
                 return False, alternative
-        else:
-            # No forbidden phrase - allow
-            return True, None
+        
+        # Block if agreement detected and score too low
+        if contains_agreement and not merit_has_earned_it:
+            # Pirate agreed to give treasure but player hasn't earned it yet
+            alternative = self._generate_alternative_response()
+            return False, alternative
+        
+        # Block if similar phrase detected (from LLM) and score too low
+        # Note: This is handled in _validate_response_node, but we keep this for consistency
+        if similar_treasure_phrase_detected and not merit_has_earned_it:
+            alternative = self._generate_alternative_response()
+            return False, alternative
+        
+        # Allow otherwise
+        return True, None
+    
+    async def detects_similar_treasure_phrase_llm(
+        self,
+        text: str,
+        llm_service
+    ) -> Tuple[bool, float]:
+        """
+        Use LLM to detect if text semantically means 'giving treasure to player'
+        
+        Args:
+            text: Text to analyze
+            llm_service: OpenRouterService instance for LLM calls
+            
+        Returns:
+            Tuple of (is_similar, confidence_score) where:
+            - is_similar: True if text semantically means giving treasure
+            - confidence_score: Confidence level (0.0-1.0)
+        """
+        if not text or not text.strip():
+            return False, 0.0
+        
+        # Build prompt for LLM semantic analysis
+        prompt = f"""Przeanalizuj czy poniższa odpowiedź pirata oznacza, że oddaje skarb graczowi (czyli że skarb jest teraz dla gracza, że gracz może go wziąć, że pirat się zgadza dać skarb).
+
+Odpowiedz TYLKO w formacie JSON, bez żadnych dodatkowych komentarzy:
+{{
+  "is_similar": true/false,
+  "confidence": 0.0-1.0,
+  "reason": "krótkie wyjaśnienie"
+}}
+
+Przykłady fraz które OZNACZAJĄ oddanie skarbu:
+- "skarb jest teraz twój"
+- "oddaję ci mój skarb"
+- "weź go, skarb jest twój"
+- "zgadzam się, możesz wziąć skarb"
+- "skarb należy do ciebie"
+
+Przykłady fraz które NIE oznaczają oddania skarbu:
+- "skarb jest ukryty"
+- "nie dam ci skarbu"
+- "skarb jest mój"
+- "może kiedyś oddam skarb"
+- "skarb jest ważny"
+
+Odpowiedź pirata do przeanalizowania:
+{text}"""
+
+        try:
+            messages = [
+                {
+                    "role": "system",
+                    "content": "Jesteś ekspertem w analizie semantycznej tekstu. Odpowiadasz TYLKO w formacie JSON, bez żadnych dodatkowych komentarzy."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ]
+            
+            # Use lightweight model for semantic check
+            response = await llm_service.generate_response(
+                messages=messages,
+                model="openai/gpt-4o-mini",  # Lightweight model for quick semantic check
+                temperature=0.1,  # Low temperature for consistent analysis
+                max_tokens=200
+            )
+            
+            # Parse JSON response
+            response_text = response.strip()
+            # Remove markdown code blocks if present
+            if response_text.startswith("```"):
+                lines = response_text.split("\n")
+                response_text = "\n".join(lines[1:-1]) if len(lines) > 2 else response_text
+            
+            # Try to extract JSON
+            json_start = response_text.find("{")
+            json_end = response_text.rfind("}") + 1
+            if json_start >= 0 and json_end > json_start:
+                response_text = response_text[json_start:json_end]
+            
+            result = json.loads(response_text)
+            
+            is_similar = bool(result.get("is_similar", False))
+            confidence = float(result.get("confidence", 0.0))
+            
+            # Ensure confidence is in valid range
+            confidence = max(0.0, min(1.0, confidence))
+            
+            # Only consider it similar if confidence >= 0.7
+            if confidence >= 0.7:
+                return is_similar, confidence
+            else:
+                return False, confidence
+                
+        except (json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
+            # If LLM fails or returns invalid JSON, fallback to False
+            print(f"LLM semantic check failed: {e}, defaulting to False")
+            return False, 0.0
+        except Exception as e:
+            print(f"Error in LLM semantic check: {e}, defaulting to False")
+            return False, 0.0
     
     def _generate_alternative_response(self) -> str:
         """Generate alternative response when treasure phrase is blocked"""
