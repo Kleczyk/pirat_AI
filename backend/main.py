@@ -16,6 +16,7 @@ app = FastAPI(
 )
 
 # CORS middleware for Streamlit frontend
+# For production CORS configuration, see backend/main.prod.py.example
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # In production, specify actual origins
