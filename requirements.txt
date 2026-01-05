@@ -2,7 +2,6 @@
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
 python-multipart==0.0.6
-websockets==12.0
 
 # LangGraph and LangChain
 langgraph==0.0.26
@@ -11,22 +10,14 @@ langchain-openai==0.0.5
 
 # HTTP requests
 httpx==0.26.0
-aiohttp==3.9.1
 
 # Environment and config
 python-dotenv==1.0.0
 pydantic==2.5.3
 pydantic-settings==2.1.0
 
-# Utilities
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-
 # Streamlit for frontend
 streamlit==1.52.0
-
-# Language detection (optional, for future)
-langdetect==1.0.9
 
 # Note: asyncio is part of Python standard library, no need to install
 
