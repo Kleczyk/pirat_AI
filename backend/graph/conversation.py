@@ -131,10 +131,12 @@ class ConversationGraph:
             })
         
         # Generate response (non-streaming for now)
+        # Limit max_tokens to ensure short responses (max 2 sentences ~ 100-150 tokens)
         response = await self.llm_service.generate_response(
             messages=messages,
             model=model,
             temperature=0.7,
+            max_tokens=150,  # Limit to ~2 sentences
             stream=False
         )
         
