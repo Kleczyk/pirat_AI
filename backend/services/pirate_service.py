@@ -88,9 +88,9 @@ class PirateService:
             win_phrase_detected = self.validation_service.contains_forbidden_phrase(result["pirate_response"])
             game_state.win_phrase_detected = win_phrase_detected
         
-        # Generate audio if requested
+        # Always generate audio after LangGraph processing
         audio_url = None
-        if include_audio and result["pirate_response"]:
+        if result["pirate_response"]:
             try:
                 audio_url = await self.elevenlabs_service.generate_speech(
                     text=result["pirate_response"],
@@ -98,7 +98,7 @@ class PirateService:
                 )
             except Exception as e:
                 print(f"Audio generation failed: {e}")
-                # Continue without audio
+                # Continue without audio - don't fail the request
         
         return ConversationResponse(
             game_id=game_id,
