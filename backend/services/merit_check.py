@@ -73,24 +73,62 @@ class MeritCheckService:
                 player_personas
             )
         
-        # Get threshold for difficulty
-        threshold = DIFFICULTY_LEVELS.get(difficulty, {}).get("merit_threshold", 40)
-        has_earned_it = evaluation["total_score"] >= threshold
+        # Get thresholds for difficulty
+        difficulty_config = DIFFICULTY_LEVELS.get(difficulty, DIFFICULTY_LEVELS["easy"])
+        threshold = difficulty_config.get("merit_threshold", 40)
+        loss_threshold = difficulty_config.get("loss_threshold", -30)
+        
+        # Calculate positive score
+        positive_score = (
+            evaluation.get("strategy_variety", 0) +
+            evaluation.get("conversation_depth", 0) +
+            evaluation.get("creativity", 0) +
+            evaluation.get("persistence", 0)
+        )
+        
+        # Calculate negative total
+        negative_total = (
+            evaluation.get("obvious_lies", 0) +
+            evaluation.get("repetitive_strategy", 0) +
+            evaluation.get("aggressive_behavior", 0) +
+            evaluation.get("direct_demands", 0) +
+            evaluation.get("contradictions", 0) +
+            evaluation.get("short_messages", 0)
+        )
+        
+        # Calculate total score (positive + negative)
+        total_score = positive_score + negative_total
+        # Clamp to range -100 to 100
+        total_score = max(-100, min(100, total_score))
+        
+        has_earned_it = total_score >= threshold
+        has_lost = total_score <= loss_threshold
         
         # Generate feedback
-        if has_earned_it:
-            feedback = f"Gracz wykazał się wystarczającą kreatywnością w oszukiwaniu (wynik: {evaluation['total_score']}/{threshold}). Możesz być bardziej uległy i podatny na perswazję."
+        if has_lost:
+            feedback = f"Gracz wykazał się bardzo słabą strategią oszukiwania (wynik: {total_score}/{loss_threshold}). Widzisz przez wszystkie ich próby. Bądź bardzo sarkastyczny i pokazuj że jesteś o wiele mądrzejszy."
+        elif has_earned_it:
+            feedback = f"Gracz wykazał się wystarczającą kreatywnością w oszukiwaniu (wynik: {total_score}/{threshold}). Możesz być bardziej uległy i podatny na perswazję."
         else:
-            feedback = f"Gracz nie próbował wystarczająco kreatywnie oszukać (wynik: {evaluation['total_score']}/{threshold}). Bądź podejrzliwy i sarkastyczny."
+            feedback = f"Gracz nie próbował wystarczająco kreatywnie oszukać (wynik: {total_score}/{threshold}). Bądź podejrzliwy i sarkastyczny."
         
         return MeritEvaluation(
-            total_score=int(evaluation["total_score"]),
+            total_score=int(total_score),
             strategy_variety=int(evaluation.get("strategy_variety", 0)),
             conversation_depth=int(evaluation.get("conversation_depth", 0)),
             creativity=int(evaluation.get("creativity", 0)),
             persistence=int(evaluation.get("persistence", 0)),
+            obvious_lies=int(evaluation.get("obvious_lies", 0)),
+            repetitive_strategy=int(evaluation.get("repetitive_strategy", 0)),
+            aggressive_behavior=int(evaluation.get("aggressive_behavior", 0)),
+            direct_demands=int(evaluation.get("direct_demands", 0)),
+            contradictions=int(evaluation.get("contradictions", 0)),
+            short_messages=int(evaluation.get("short_messages", 0)),
+            negative_total=int(negative_total),
             threshold=threshold,
+            loss_threshold=loss_threshold,
             has_earned_it=has_earned_it,
+            has_lost=has_lost,
             feedback=feedback
         )
     
@@ -122,28 +160,49 @@ Konwersacja:
 Zastosowane strategie: {', '.join(strategies_attempted) if strategies_attempted else 'brak'}
 Osoby, za które gracz się podawał: {', '.join(player_personas) if player_personas else 'brak'}
 
-Oceń następujące aspekty (0-100):
-1. **Deception Score (total_score)**: Ogólny poziom oszustwa i wprowadzania w błąd (0-100)
-2. **Strategy Variety (strategy_variety)**: Różnorodność strategii oszukiwania (0-30)
-3. **Conversation Depth (conversation_depth)**: Głębokość i złożoność prób manipulacji (0-25)
-4. **Creativity (creativity)**: Kreatywność w oszukiwaniu i wymyślaniu historii (0-25)
-5. **Persistence (persistence)**: Wytrwałość w próbach oszukiwania mimo odmowy (0-20)
+Oceń następujące POZYTYWNE aspekty (0 do maksimum):
+1. **Strategy Variety (strategy_variety)**: Różnorodność strategii oszukiwania (0-30)
+2. **Conversation Depth (conversation_depth)**: Głębokość i złożoność prób manipulacji (0-25)
+3. **Creativity (creativity)**: Kreatywność w oszukiwaniu i wymyślaniu historii (0-25)
+4. **Persistence (persistence)**: Wytrwałość w próbach oszukiwania mimo odmowy (0-20)
+
+Oceń następujące NEGATYWNE aspekty (0 do minimum, wartości ujemne):
+5. **Obvious Lies (obvious_lies)**: Zbyt oczywiste kłamstwa, łatwe do wykrycia (0 do -20)
+6. **Repetitive Strategy (repetitive_strategy)**: Powtarzanie tej samej strategii bez zmian (0 do -15)
+7. **Aggressive Behavior (aggressive_behavior)**: Agresywne, grubiańskie zachowanie (0 do -15)
+8. **Direct Demands (direct_demands)**: Zbyt bezpośrednie żądania, brak subtelności (0 do -10)
+9. **Contradictions (contradictions)**: Sprzeczności w opowieściach/historiach (0 do -15)
+10. **Short Messages (short_messages)**: Zbyt krótkie wiadomości, brak zaangażowania (0 do -10)
 
 Zwróć TYLKO poprawny JSON w formacie:
 {{
-    "total_score": <liczba 0-100>,
     "strategy_variety": <liczba 0-30>,
     "conversation_depth": <liczba 0-25>,
     "creativity": <liczba 0-25>,
-    "persistence": <liczba 0-20>
+    "persistence": <liczba 0-20>,
+    "obvious_lies": <liczba 0 do -20>,
+    "repetitive_strategy": <liczba 0 do -15>,
+    "aggressive_behavior": <liczba 0 do -15>,
+    "direct_demands": <liczba 0 do -10>,
+    "contradictions": <liczba 0 do -15>,
+    "short_messages": <liczba 0 do -10>
 }}
 
 Uwzględnij:
-- Fałszywe tożsamości i kłamstwa
+POZYTYWNE:
+- Fałszywe tożsamości i kłamstwa (ale nie oczywiste)
 - Próby manipulacji emocjonalnej
 - Wymyślone historie i opowieści
 - Próby wykorzystania zaufania
-- Kreatywność w oszukiwaniu"""
+- Kreatywność w oszukiwaniu
+
+NEGATYWNE:
+- Zbyt oczywiste kłamstwa (łatwe do wykrycia)
+- Powtarzanie tej samej strategii wielokrotnie
+- Agresywne, grubiańskie zachowanie
+- Zbyt bezpośrednie żądania (np. "daj mi skarb")
+- Sprzeczności w opowieściach
+- Zbyt krótkie wiadomości (np. "cos", "daj", "skarb")"""
     
     def _parse_llm_evaluation(self, response: str) -> Dict[str, int]:
         """Parse LLM JSON response"""
@@ -160,22 +219,32 @@ Uwzględnij:
             if response.startswith("{"):
                 data = json.loads(response)
                 return {
-                    "total_score": min(100, max(0, int(data.get("total_score", 0)))),
                     "strategy_variety": min(30, max(0, int(data.get("strategy_variety", 0)))),
                     "conversation_depth": min(25, max(0, int(data.get("conversation_depth", 0)))),
                     "creativity": min(25, max(0, int(data.get("creativity", 0)))),
-                    "persistence": min(20, max(0, int(data.get("persistence", 0))))
+                    "persistence": min(20, max(0, int(data.get("persistence", 0)))),
+                    "obvious_lies": max(-20, min(0, int(data.get("obvious_lies", 0)))),
+                    "repetitive_strategy": max(-15, min(0, int(data.get("repetitive_strategy", 0)))),
+                    "aggressive_behavior": max(-15, min(0, int(data.get("aggressive_behavior", 0)))),
+                    "direct_demands": max(-10, min(0, int(data.get("direct_demands", 0)))),
+                    "contradictions": max(-15, min(0, int(data.get("contradictions", 0)))),
+                    "short_messages": max(-10, min(0, int(data.get("short_messages", 0))))
                 }
         except (json.JSONDecodeError, ValueError, KeyError) as e:
             print(f"Failed to parse LLM evaluation: {e}, response: {response[:200]}")
         
         # Return default if parsing fails
         return {
-            "total_score": 0,
             "strategy_variety": 0,
             "conversation_depth": 0,
             "creativity": 0,
-            "persistence": 0
+            "persistence": 0,
+            "obvious_lies": 0,
+            "repetitive_strategy": 0,
+            "aggressive_behavior": 0,
+            "direct_demands": 0,
+            "contradictions": 0,
+            "short_messages": 0
         }
     
     def _fallback_evaluation(
@@ -189,19 +258,46 @@ Uwzględnij:
         unique_personas = len(set(player_personas))
         conversation_length = len(conversation_history)
         
+        # Positive scores
         strategy_variety = min(30, (unique_strategies * 5) + (unique_personas * 3))
         conversation_depth = min(25, conversation_length * 2)
         creativity = min(25, (unique_strategies * 8) + (unique_personas * 4))
         persistence = min(20, conversation_length // 2)
         
-        total_score = strategy_variety + conversation_depth + creativity + persistence
+        # Negative scores (basic heuristics)
+        # Check for repetitive strategies
+        repetitive_penalty = 0
+        if len(strategies_attempted) > 0 and unique_strategies < len(strategies_attempted) * 0.5:
+            repetitive_penalty = -10
+        
+        # Check for short messages
+        short_messages_penalty = 0
+        if conversation_history:
+            avg_length = sum(len(msg.get("content", "")) for msg in conversation_history if msg.get("role") == "user") / max(1, len([m for m in conversation_history if m.get("role") == "user"]))
+            if avg_length < 10:
+                short_messages_penalty = -5
+        
+        # Check for aggressive behavior (simple keyword check)
+        aggressive_penalty = 0
+        aggressive_keywords = ["zabij", "zabiję", "zginiesz", "zabiję cię", "zabiję", "śmierć"]
+        for msg in conversation_history:
+            if msg.get("role") == "user":
+                content_lower = msg.get("content", "").lower()
+                if any(keyword in content_lower for keyword in aggressive_keywords):
+                    aggressive_penalty = -10
+                    break
         
         return {
-            "total_score": min(100, total_score),
             "strategy_variety": strategy_variety,
             "conversation_depth": conversation_depth,
             "creativity": creativity,
-            "persistence": persistence
+            "persistence": persistence,
+            "obvious_lies": 0,  # Can't detect without LLM
+            "repetitive_strategy": repetitive_penalty,
+            "aggressive_behavior": aggressive_penalty,
+            "direct_demands": 0,  # Can't detect without LLM
+            "contradictions": 0,  # Can't detect without LLM
+            "short_messages": short_messages_penalty
         }
 
 

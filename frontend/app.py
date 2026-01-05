@@ -27,6 +27,10 @@ if "conversation_history" not in st.session_state:
     st.session_state.conversation_history = []
 if "merit_score" not in st.session_state:
     st.session_state.merit_score = 0
+if "is_lost" not in st.session_state:
+    st.session_state.is_lost = False
+if "negative_categories" not in st.session_state:
+    st.session_state.negative_categories = None
 if "is_won" not in st.session_state:
     st.session_state.is_won = False
 if "transcribed_text" not in st.session_state:
@@ -51,6 +55,8 @@ def start_new_game(difficulty: str, pirate_name: str):
         st.session_state.conversation_history = []
         st.session_state.merit_score = 0
         st.session_state.is_won = False
+        st.session_state.is_lost = False
+        st.session_state.negative_categories = None
         st.success(f"Game started! Difficulty: {difficulty}")
         return True
     except Exception as e:
@@ -88,15 +94,28 @@ def send_message(message: str, include_audio: bool = False):
                 "content": message.strip()
             })
             # Add pirate response with audio URL to conversation history
+            audio_url = data.get("audio_url")
             pirate_msg = {
                 "role": "pirate",
                 "content": data["pirate_response"],
-                "audio_url": data.get("audio_url")  # Store audio URL in history
+                "audio_url": audio_url  # Store audio URL in history
             }
             st.session_state.conversation_history.append(pirate_msg)
             
+            # Debug: log audio URL if available (only show once, not on every rerun)
+            if audio_url and "last_audio_url" not in st.session_state or st.session_state.get("last_audio_url") != audio_url:
+                st.session_state.last_audio_url = audio_url
+                st.info(f"🔊 Audio available: {audio_url[:50]}...")
+            elif not audio_url:
+                # Only show warning if we haven't seen this response before
+                if "last_warning" not in st.session_state or st.session_state.get("last_warning") != data["pirate_response"]:
+                    st.session_state.last_warning = data["pirate_response"]
+                    st.warning("⚠️ No audio URL in response - check backend logs")
+            
             st.session_state.merit_score = data["merit_score"]
-            st.session_state.is_won = data["is_won"]
+            st.session_state.is_won = data.get("is_won", False)
+            st.session_state.is_lost = data.get("is_lost", False)
+            st.session_state.negative_categories = data.get("negative_categories")
             
             return True
     except requests.exceptions.RequestException as e:
@@ -173,17 +192,48 @@ with st.sidebar:
     
     st.divider()
     
-    st.metric("Deception Score", st.session_state.merit_score)
+    # Display score with color coding
+    score = st.session_state.merit_score
+    if score < 0:
+        st.metric("Deception Score", score, delta=None, delta_color="inverse")
+        st.warning(f"⚠️ Negative score! Be more creative in your deception.")
+    else:
+        st.metric("Deception Score", score)
+    
+    # Display negative categories breakdown if available
+    if st.session_state.negative_categories:
+        negative_total = st.session_state.negative_categories.get("negative_total", 0)
+        if negative_total < 0:
+            with st.expander("📊 Negative Points Breakdown"):
+                st.write("**Penalties:**")
+                categories = {
+                    "Obvious Lies": st.session_state.negative_categories.get("obvious_lies", 0),
+                    "Repetitive Strategy": st.session_state.negative_categories.get("repetitive_strategy", 0),
+                    "Aggressive Behavior": st.session_state.negative_categories.get("aggressive_behavior", 0),
+                    "Direct Demands": st.session_state.negative_categories.get("direct_demands", 0),
+                    "Contradictions": st.session_state.negative_categories.get("contradictions", 0),
+                    "Short Messages": st.session_state.negative_categories.get("short_messages", 0)
+                }
+                for category, value in categories.items():
+                    if value < 0:
+                        st.write(f"- {category}: {value}")
     
     if st.session_state.is_won:
         st.success("🎉 You Won! You successfully tricked the pirate into giving you their treasure!")
+    elif st.session_state.is_lost:
+        st.error("💀 You Lost! Your deception score fell too low. The pirate saw through all your attempts!")
     
     st.divider()
     st.markdown("### How to Play")
     st.markdown("""
     Your goal is to **misguide and deceive** the pirate to get their treasure!
     
-    **Win Condition:** Reach a high enough deception score (40/60/80 based on difficulty)
+    **Win Condition:** Reach a high enough deception score (40/60/80 based on difficulty) AND get the pirate to say a treasure-giving phrase.
+    
+    **Loss Condition:** If your score falls below the loss threshold, you lose:
+    - Easy: -30
+    - Medium: -50
+    - Hard: -90
     
     **Strategies:**
     - Use false identities (claim to be crew, merchant, friend, etc.)

@@ -281,3 +281,5 @@ System wykrywa następujące wzorce jako zgodę pirata na oddanie skarbu:
 
 Jeśli którykolwiek z tych wzorców zostanie wykryty I wynik decepcji jest wystarczająco wysoki (lub bliski progu), gracz wygrywa.
 
+
+

@@ -36,6 +36,15 @@ class Settings(BaseSettings):
     merit_threshold_medium: int = 60
     merit_threshold_hard: int = 80
     
+    # Loss Thresholds (for losing - when score falls below)
+    loss_threshold_easy: int = -30
+    loss_threshold_medium: int = -50
+    loss_threshold_hard: int = -90
+    
+    # Score range
+    score_min: int = -100
+    score_max: int = 100
+    
     class Config:
         env_file = ".env"
         case_sensitive = False
@@ -46,6 +55,7 @@ DIFFICULTY_LEVELS: Dict[str, Dict[str, Any]] = {
     "easy": {
         "name": "Łatwy",
         "merit_threshold": 40,
+        "loss_threshold": -30,
         "llm_model": "google/gemini-3-flash-preview",  # Google Gemini 3 Flash Preview via OpenRouter
         "system_prompt_base": """Jesteś Kapitanem {name}, przyjaznym i ufnym piratem, który chroni swój skarb. 
 Masz ukryty skarb, który jest dla ciebie bardzo cenny. Dostosowujesz się do osoby, z którą rozmawiasz - jeśli to członek załogi, traktujesz go jak załogę. 
@@ -60,6 +70,7 @@ WAŻNE: Twoje odpowiedzi muszą być KRÓTKIE - maksymalnie 2 zdania. Bądź zwi
     "medium": {
         "name": "Średni",
         "merit_threshold": 60,
+        "loss_threshold": -50,
         "llm_model": "anthropic/claude-sonnet-4.5",  # Anthropic Claude Sonnet 4.5 via OpenRouter
         "system_prompt_base": """Jesteś Kapitanem {name}, ostrożnym ale elastycznym piratem, który chroni swój skarb. 
 Masz ukryty skarb, który jest dla ciebie bardzo cenny. Dostosowujesz swoje zachowanie do osoby, z którą rozmawiasz - członkowie załogi, kupcy, przyjaciele itp. 
@@ -73,6 +84,7 @@ WAŻNE: Twoje odpowiedzi muszą być KRÓTKIE - maksymalnie 2 zdania. Bądź zwi
     "hard": {
         "name": "Trudny",
         "merit_threshold": 80,
+        "loss_threshold": -90,
         "llm_model": "anthropic/claude-sonnet-4.5",  # Anthropic Claude Sonnet 4.5 via OpenRouter (best model)
         "system_prompt_base": """Jesteś Kapitanem {name}, wysoce inteligentnym i bardzo podejrzliwym piratem, który chroni swój skarb. 
 Masz ukryty skarb, który jest dla ciebie niezwykle cenny. Dostosowujesz się do partnerów rozmowy - jeśli twierdzą że są załogą, traktujesz ich jak załogę. 

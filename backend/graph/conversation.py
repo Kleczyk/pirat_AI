@@ -1,7 +1,7 @@
 """
 LangGraph state machine for conversation flow
 """
-from typing import TypedDict, Annotated, Literal
+from typing import TypedDict, Annotated, Literal, Dict, Optional
 from langgraph.graph import StateGraph, END
 try:
     from langgraph.graph.message import add_messages
@@ -29,8 +29,10 @@ class ConversationState(TypedDict):
     pirate_response: str
     is_blocked: bool
     is_won: bool
+    is_lost: bool
     similar_treasure_phrase_detected: bool
     similarity_confidence: float
+    negative_categories: Optional[Dict[str, int]]  # Optional: negative point categories breakdown
 
 
 class ConversationGraph:
@@ -88,6 +90,18 @@ class ConversationGraph:
         
         state["merit_score"] = evaluation.total_score
         state["merit_has_earned_it"] = evaluation.has_earned_it
+        state["is_lost"] = evaluation.has_lost
+        
+        # Store negative categories as dict for later use
+        state["negative_categories"] = {
+            "obvious_lies": evaluation.obvious_lies,
+            "repetitive_strategy": evaluation.repetitive_strategy,
+            "aggressive_behavior": evaluation.aggressive_behavior,
+            "direct_demands": evaluation.direct_demands,
+            "contradictions": evaluation.contradictions,
+            "short_messages": evaluation.short_messages,
+            "negative_total": evaluation.negative_total
+        }
         
         return state
     
@@ -250,10 +264,14 @@ class ConversationGraph:
         player_personas: list
     ) -> dict:
         """Process a user message through the graph"""
+        # Convert difficulty enum to string if needed
+        if hasattr(difficulty, 'value'):
+            difficulty = difficulty.value
+        
         initial_state: ConversationState = {
             "messages": [HumanMessage(content=user_message)],
             "game_id": game_id,
-            "difficulty": difficulty,
+            "difficulty": str(difficulty),
             "conversation_history": conversation_history,
             "strategies_attempted": strategies_attempted,
             "player_personas": player_personas,
@@ -262,18 +280,27 @@ class ConversationGraph:
             "pirate_response": "",
             "is_blocked": False,
             "is_won": False,
+            "is_lost": False,
             "similar_treasure_phrase_detected": False,
-            "similarity_confidence": 0.0
+            "similarity_confidence": 0.0,
+            "negative_categories": None
         }
         
         # Run graph
         final_state = await self.graph.ainvoke(initial_state)
+        
+        # Get negative categories from state
+        negative_categories = final_state.get("negative_categories")
         
         return {
             "pirate_response": final_state["pirate_response"],
             "merit_score": final_state["merit_score"],
             "merit_has_earned_it": final_state["merit_has_earned_it"],
             "is_won": final_state["is_won"],
-            "is_blocked": final_state["is_blocked"]
+            "is_lost": final_state.get("is_lost", False),
+            "is_blocked": final_state["is_blocked"],
+            "similar_treasure_phrase_detected": final_state.get("similar_treasure_phrase_detected", False),
+            "similarity_confidence": final_state.get("similarity_confidence", 0.0),
+            "negative_categories": negative_categories
         }
 

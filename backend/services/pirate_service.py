@@ -80,6 +80,11 @@ class PirateService:
             "content": result["pirate_response"]
         })
         
+        # Check for loss condition (score below loss threshold)
+        is_lost = result.get("is_lost", False)
+        if is_lost:
+            game_state.is_lost = True
+        
         # Check for win condition (deception score-based or phrase detection)
         is_won = result["is_won"]
         if is_won:
@@ -88,17 +93,29 @@ class PirateService:
             win_phrase_detected = self.validation_service.contains_forbidden_phrase(result["pirate_response"])
             game_state.win_phrase_detected = win_phrase_detected
         
+        # Build negative categories dict for response
+        negative_categories = None
+        if "negative_categories" in result:
+            negative_categories = result["negative_categories"]
+        
         # Always generate audio after LangGraph processing
         audio_url = None
-        if result["pirate_response"]:
+        pirate_response = result.get("pirate_response", "")
+        if pirate_response and pirate_response.strip():
             try:
+                print(f"[Audio] Generating audio for response (length: {len(pirate_response)}): {pirate_response[:50]}...")
                 audio_url = await self.elevenlabs_service.generate_speech(
-                    text=result["pirate_response"],
+                    text=pirate_response,
                     wait_for_completion=True
                 )
+                print(f"[Audio] Audio generated successfully: {audio_url}")
             except Exception as e:
-                print(f"Audio generation failed: {e}")
+                print(f"[Audio] Audio generation failed: {e}")
+                import traceback
+                traceback.print_exc()
                 # Continue without audio - don't fail the request
+        else:
+            print(f"[Audio] Skipping audio generation - empty or missing pirate_response")
         
         return ConversationResponse(
             game_id=game_id,
@@ -106,7 +123,9 @@ class PirateService:
             merit_score=result["merit_score"],
             audio_url=audio_url,
             is_won=is_won,
-            win_phrase_detected=game_state.win_phrase_detected if is_won else False
+            is_lost=is_lost,
+            win_phrase_detected=game_state.win_phrase_detected if is_won else False,
+            negative_categories=negative_categories
         )
     
     def get_game_state(self, game_id: str) -> Optional[GameState]:
