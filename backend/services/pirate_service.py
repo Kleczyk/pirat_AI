@@ -4,8 +4,9 @@ Pirate service - orchestrates conversation flow
 from typing import Dict, Any, Optional
 from backend.graph.conversation import ConversationGraph
 from backend.services.elevenlabs_service import ElevenLabsService
+from backend.services.gpt_audio_service import GPTAudioService
 from backend.models.game import GameState, ConversationResponse
-from backend.config import FORBIDDEN_PHRASE
+from backend.config import FORBIDDEN_PHRASE, settings
 from backend.services.validation import ValidationService
 import uuid
 import re
@@ -17,6 +18,7 @@ class PirateService:
     def __init__(self):
         self.conversation_graph = ConversationGraph()
         self.elevenlabs_service = ElevenLabsService()
+        self.gpt_audio_service = GPTAudioService()
         self.validation_service = ValidationService()
         self.games: Dict[str, GameState] = {}
         
@@ -98,22 +100,47 @@ class PirateService:
         if "negative_categories" in result:
             negative_categories = result["negative_categories"]
         
-        # Always generate audio after LangGraph processing
+        # Generate audio after LangGraph processing
         audio_url = None
+        streaming_audio_endpoint = None
         pirate_response = result.get("pirate_response", "")
+        
         if pirate_response and pirate_response.strip():
-            try:
-                print(f"[Audio] Generating audio for response (length: {len(pirate_response)}): {pirate_response[:50]}...")
-                audio_url = await self.elevenlabs_service.generate_speech(
-                    text=pirate_response,
-                    wait_for_completion=True
-                )
-                print(f"[Audio] Audio generated successfully: {audio_url}")
-            except Exception as e:
-                print(f"[Audio] Audio generation failed: {e}")
-                import traceback
-                traceback.print_exc()
-                # Continue without audio - don't fail the request
+            if settings.use_gpt_audio:
+                # Use GPT Audio with streaming
+                try:
+                    print(f"[Audio] Using GPT Audio streaming for response (length: {len(pirate_response)}): {pirate_response[:50]}...")
+                    # Return streaming endpoint instead of generating audio synchronously
+                    streaming_audio_endpoint = f"/api/game/conversation/stream-audio"
+                    print(f"[Audio] Streaming audio endpoint available: {streaming_audio_endpoint}")
+                except Exception as e:
+                    print(f"[Audio] GPT Audio setup failed: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    # Fallback to ElevenLabs if GPT Audio fails
+                    try:
+                        print(f"[Audio] Falling back to ElevenLabs...")
+                        audio_url = await self.elevenlabs_service.generate_speech(
+                            text=pirate_response,
+                            wait_for_completion=True
+                        )
+                        print(f"[Audio] ElevenLabs audio generated successfully: {audio_url}")
+                    except Exception as e2:
+                        print(f"[Audio] ElevenLabs fallback also failed: {e2}")
+            else:
+                # Use ElevenLabs (legacy)
+                try:
+                    print(f"[Audio] Generating audio with ElevenLabs (length: {len(pirate_response)}): {pirate_response[:50]}...")
+                    audio_url = await self.elevenlabs_service.generate_speech(
+                        text=pirate_response,
+                        wait_for_completion=True
+                    )
+                    print(f"[Audio] Audio generated successfully: {audio_url}")
+                except Exception as e:
+                    print(f"[Audio] Audio generation failed: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    # Continue without audio - don't fail the request
         else:
             print(f"[Audio] Skipping audio generation - empty or missing pirate_response")
         
@@ -122,6 +149,7 @@ class PirateService:
             pirate_response=result["pirate_response"],
             merit_score=result["merit_score"],
             audio_url=audio_url,
+            streaming_audio_endpoint=streaming_audio_endpoint,
             is_won=is_won,
             is_lost=is_lost,
             win_phrase_detected=game_state.win_phrase_detected if is_won else False,

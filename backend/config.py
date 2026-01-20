@@ -2,7 +2,7 @@
 Configuration for the Outwit the AI Pirate Game
 """
 from pydantic_settings import BaseSettings
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import os
 from dotenv import load_dotenv
 
@@ -21,6 +21,17 @@ class Settings(BaseSettings):
     elevenlabs_model: str = os.getenv("ELEVENLABS_MODEL", "elevenlabs/text-to-speech-turbo-2-5")
     elevenlabs_voice: str = os.getenv("ELEVENLABS_VOICE", "Rachel")
     elevenlabs_language_code: str = os.getenv("ELEVENLABS_LANGUAGE_CODE", "pl")
+    
+    # GPT Audio (via OpenRouter)
+    gpt_audio_model: str = os.getenv("GPT_AUDIO_MODEL", "openai/gpt-audio")
+    gpt_audio_voice: Optional[str] = os.getenv("GPT_AUDIO_VOICE", None)
+    gpt_audio_format: str = os.getenv("GPT_AUDIO_FORMAT", "pcm16")  # pcm16 required for streaming
+    gpt_audio_sample_rate: int = int(os.getenv("GPT_AUDIO_SAMPLE_RATE", "24000"))
+    use_tts_only: bool = os.getenv("USE_TTS_ONLY", "True").lower() == "true"
+    tts_model: str = os.getenv("TTS_MODEL", "openai/gpt-audio-mini")
+    tts_voice: str = os.getenv("TTS_VOICE", "alloy")
+    tts_format: str = os.getenv("TTS_FORMAT", "mp3")  # mp3/wav for TTS-only
+    use_gpt_audio: bool = os.getenv("USE_GPT_AUDIO", "True").lower() == "true"
     
     # Server
     host: str = os.getenv("HOST", "0.0.0.0")

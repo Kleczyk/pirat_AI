@@ -6,10 +6,17 @@ import requests
 import json
 from typing import Optional
 import io
+import base64
+import time
+import wave
 
 # Configuration
 import os
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
+GPT_AUDIO_FORMAT = os.getenv("GPT_AUDIO_FORMAT", "pcm16").lower()
+GPT_AUDIO_SAMPLE_RATE = int(os.getenv("GPT_AUDIO_SAMPLE_RATE", "24000"))
+TTS_FORMAT = os.getenv("TTS_FORMAT", "mp3").lower()
+USE_TTS_ONLY = os.getenv("USE_TTS_ONLY", "True").lower() == "true"
 
 st.set_page_config(
     page_title="Outwit the AI Pirate",
@@ -39,6 +46,19 @@ if "processed_audio_hash" not in st.session_state:
     st.session_state.processed_audio_hash = None
 
 
+def pcm16_to_wav(pcm_bytes: bytes, sample_rate: int) -> bytes:
+    """
+    Convert raw PCM16 mono audio to WAV container.
+    """
+    with io.BytesIO() as buffer:
+        with wave.open(buffer, "wb") as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)  # 16-bit
+            wav_file.setframerate(sample_rate)
+            wav_file.writeframes(pcm_bytes)
+        return buffer.getvalue()
+
+
 def start_new_game(difficulty: str, pirate_name: str):
     """Start a new game"""
     try:
@@ -64,6 +84,82 @@ def start_new_game(difficulty: str, pirate_name: str):
         return False
 
 
+def play_streaming_audio(endpoint: str, text: str) -> Optional[bytes]:
+    """
+    Stream audio from SSE endpoint and accumulate chunks
+    
+    Args:
+        endpoint: Streaming endpoint path
+        text: Text to convert to speech
+        
+    Returns:
+        Complete audio bytes or None if failed
+    """
+    try:
+        audio_chunks = []
+        full_url = f"{API_BASE_URL}{endpoint}"
+        
+        response = requests.post(
+            full_url,
+            json={
+                "text": text
+            },
+            stream=True,
+            timeout=120
+        )
+        response.raise_for_status()
+        
+        # Parse SSE stream
+        chunk_count = 0
+        for line in response.iter_lines():
+            if not line:
+                continue
+                
+            line_str = line.decode('utf-8')
+            
+            if line_str.startswith("data: "):
+                data_str = line_str[6:]  # Remove "data: " prefix
+                
+                if data_str == "[DONE]":
+                    st.info(f"✅ Received {chunk_count} audio chunks")
+                    break
+                    
+                if data_str.startswith("ERROR:"):
+                    error_msg = base64.b64decode(data_str[6:]).decode('utf-8')
+                    st.error(f"Streaming error: {error_msg}")
+                    return None
+                
+                # Decode base64 audio chunk
+                try:
+                    audio_chunk = base64.b64decode(data_str)
+                    if len(audio_chunk) > 0:
+                        audio_chunks.append(audio_chunk)
+                        chunk_count += 1
+                    else:
+                        st.warning("⚠️ Received empty audio chunk")
+                except Exception as e:
+                    st.warning(f"⚠️ Failed to decode audio chunk: {e}")
+                    continue
+        
+        # Combine all chunks
+        if audio_chunks:
+            total_size = sum(len(chunk) for chunk in audio_chunks)
+            st.info(f"🎵 Total audio size: {total_size} bytes from {chunk_count} chunks")
+            raw_audio = b"".join(audio_chunks)
+            if (not USE_TTS_ONLY) and GPT_AUDIO_FORMAT == "pcm16":
+                return pcm16_to_wav(raw_audio, GPT_AUDIO_SAMPLE_RATE)
+            return raw_audio
+        else:
+            st.warning("⚠️ No audio chunks received!")
+        return None
+        
+    except Exception as e:
+        st.error(f"Failed to stream audio: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
 def send_message(message: str, include_audio: bool = False):
     """Send a message to the pirate"""
     if not st.session_state.game_id:
@@ -83,7 +179,7 @@ def send_message(message: str, include_audio: bool = False):
                     "message": message.strip(),
                     "include_audio": include_audio
                 },
-                timeout=120  # Increased timeout for audio generation (ElevenLabs can take up to 60s)
+                timeout=120  # Increased timeout for audio generation
             )
             response.raise_for_status()
             data = response.json()
@@ -93,24 +189,41 @@ def send_message(message: str, include_audio: bool = False):
                 "role": "user",
                 "content": message.strip()
             })
-            # Add pirate response with audio URL to conversation history
+            
+            # Handle audio - check for streaming endpoint first, then fallback to URL
+            audio_bytes = None
             audio_url = data.get("audio_url")
+            streaming_endpoint = data.get("streaming_audio_endpoint")
+            
+            # If streaming endpoint is available, use it with exact pirate response
+            if streaming_endpoint:
+                with st.spinner("🎵 Streaming audio..."):
+                    audio_bytes = play_streaming_audio(
+                        streaming_endpoint,
+                        data["pirate_response"]
+                    )
+            
+            # Build pirate message with audio data
             pirate_msg = {
                 "role": "pirate",
                 "content": data["pirate_response"],
-                "audio_url": audio_url  # Store audio URL in history
+                "audio_url": audio_url,  # Legacy support
+                "audio_bytes": audio_bytes  # Streaming audio bytes
             }
             st.session_state.conversation_history.append(pirate_msg)
             
-            # Debug: log audio URL if available (only show once, not on every rerun)
-            if audio_url and "last_audio_url" not in st.session_state or st.session_state.get("last_audio_url") != audio_url:
-                st.session_state.last_audio_url = audio_url
-                st.info(f"🔊 Audio available: {audio_url[:50]}...")
-            elif not audio_url:
+            # Debug: log audio availability
+            if audio_bytes:
+                st.success("🔊 Audio streamed successfully!")
+            elif audio_url:
+                if "last_audio_url" not in st.session_state or st.session_state.get("last_audio_url") != audio_url:
+                    st.session_state.last_audio_url = audio_url
+                    st.info(f"🔊 Audio available: {audio_url[:50]}...")
+            elif not streaming_endpoint and not audio_url:
                 # Only show warning if we haven't seen this response before
                 if "last_warning" not in st.session_state or st.session_state.get("last_warning") != data["pirate_response"]:
                     st.session_state.last_warning = data["pirate_response"]
-                    st.warning("⚠️ No audio URL in response - check backend logs")
+                    st.warning("⚠️ No audio available - check backend logs")
             
             st.session_state.merit_score = data["merit_score"]
             st.session_state.is_won = data.get("is_won", False)
@@ -262,9 +375,33 @@ if st.session_state.game_id:
         else:
             with st.chat_message("assistant"):
                 st.write(msg["content"])
-                # Display audio if available (generated by ElevenLabs)
-                if msg.get("audio_url"):
-                    st.audio(msg["audio_url"], format="audio/mpeg")
+                # Display audio if available (streaming or URL)
+                audio_bytes = msg.get("audio_bytes")
+                audio_url = msg.get("audio_url")
+                
+                if audio_bytes:
+                    # Streaming audio (from GPT Audio) - use BytesIO for Streamlit
+                    try:
+                        audio_io = io.BytesIO(audio_bytes)
+                        # Check if audio has valid header (MP3 starts with ID3 or FF)
+                        audio_header = audio_bytes[:4] if len(audio_bytes) >= 4 else b""
+                        if audio_header.startswith(b"RIFF"):
+                            st.audio(audio_io, format="audio/wav")
+                            st.caption(f"🎵 Audio (WAV): {len(audio_bytes)} bytes")
+                        elif audio_header.startswith(b"ID3") or audio_header.startswith(b"\xff\xfb") or audio_header.startswith(b"\xff\xf3"):
+                            st.audio(audio_io, format="audio/mpeg")
+                            st.caption(f"🎵 Audio (MP3): {len(audio_bytes)} bytes")
+                        else:
+                            # Try as MP3 anyway, might work
+                            st.audio(audio_io, format="audio/mpeg")
+                            st.caption(f"🎵 Audio: {len(audio_bytes)} bytes (format: {audio_header.hex()})")
+                    except Exception as e:
+                        st.error(f"❌ Error playing audio: {e}")
+                        # Debug: show audio size and header
+                        st.caption(f"Audio size: {len(audio_bytes)} bytes, header: {audio_bytes[:10].hex() if len(audio_bytes) >= 10 else 'too short'}")
+                elif audio_url:
+                    # Legacy audio URL (from ElevenLabs)
+                    st.audio(audio_url, format="audio/mpeg")
     
     # Audio recording section - simplified interface
     st.markdown("### 🎤 Mów lub Pisz")

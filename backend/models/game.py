@@ -49,12 +49,18 @@ class ConversationRequest(BaseModel):
     include_audio: bool = Field(default=False, description="Include TTS audio response")
 
 
+class AudioStreamRequest(BaseModel):
+    """Request to stream TTS audio for a given text"""
+    text: str = Field(..., description="Text to convert to speech")
+
+
 class ConversationResponse(BaseModel):
     """Response from conversation"""
     game_id: str
     pirate_response: str
     merit_score: int = Field(..., description="Current deception/misguidance score (-100 to +100)")
     audio_url: Optional[str] = None
+    streaming_audio_endpoint: Optional[str] = Field(default=None, description="Endpoint for streaming audio (SSE)")
     is_won: bool = Field(default=False, description="Whether player won (high deception score or phrase detected)")
     is_lost: bool = Field(default=False, description="Whether player lost (score below loss threshold)")
     win_phrase_detected: bool = Field(default=False, description="Whether pirate said the treasure phrase")
